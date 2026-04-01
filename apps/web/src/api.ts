@@ -75,12 +75,33 @@ export const api = {
     )
   },
 
-  getRows: (id: string, params: { page?: number; limit?: number; sortBy?: string; sortDir?: 'asc' | 'desc' }) => {
+  updateDataset: (id: string, body: { name?: string; description?: string | null; tags?: string[] }) =>
+    apiFetch<{ dataset: Dataset }>(`/api/v1/datasets/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+
+  getRows: (
+    id: string,
+    params: {
+      page?: number
+      limit?: number
+      sortBy?: string
+      sortDir?: 'asc' | 'desc'
+      filters?: Record<string, string>
+    }
+  ) => {
     const q = new URLSearchParams()
     if (params.page) q.set('page', String(params.page))
     if (params.limit) q.set('limit', String(params.limit))
     if (params.sortBy) q.set('sortBy', params.sortBy)
     if (params.sortDir) q.set('sortDir', params.sortDir)
+    if (params.filters) {
+      for (const [colId, value] of Object.entries(params.filters)) {
+        if (value) q.append('filter', `${colId}:${value}`)
+      }
+    }
     return apiFetch<RowsResponse>(`/api/v1/datasets/${id}/rows?${q}`)
   },
 

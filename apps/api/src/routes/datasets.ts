@@ -61,13 +61,29 @@ const CreateDatasetBody = z.object({
   collectionId: z.string().uuid().optional(),
 })
 
+const UpdateDatasetBody = z.object({
+  name: z.string().min(1).max(200).optional(),
+  description: z.string().nullable().optional(),
+  tags: z.array(z.string()).optional(),
+}).refine((d) => Object.keys(d).length > 0, { message: 'At least one field required' })
+
 const QueryRowsParams = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(1000).default(100),
   sortBy: z.string().optional(),
   sortDir: z.enum(['asc', 'desc']).default('asc'),
-  // filter: column:value pairs, e.g. ?filter=status:active
-  filter: z.string().optional(),
+  // filter: one or more column:value pairs, e.g. ?filter=col_0:active&filter=col_1:true
+  // A single value comes in as a string; multiple values as an array.
+  filter: z.union([z.string(), z.array(z.string())]).optional().transform((v) => {
+    if (!v) return []
+    return (Array.isArray(v) ? v : [v]).flatMap((entry) => {
+      const idx = entry.indexOf(':')
+      if (idx === -1) return []
+      const colId = entry.slice(0, idx).trim()
+      const value = entry.slice(idx + 1)
+      return colId ? [{ colId, value }] : []
+    })
+  }),
 })
 
 // ─────────────────────────────────────────────
@@ -123,6 +139,31 @@ export default async function datasetRoutes(app: FastifyInstance) {
     return reply.status(201).send({ dataset })
   })
 
+  // ── PATCH /api/v1/datasets/:id ───────────────
+  app.patch<{ Params: { id: string } }>('/api/v1/datasets/:id', async (req, reply) => {
+    const { id } = req.params
+    const body = UpdateDatasetBody.safeParse(req.body)
+    if (!body.success) return reply.status(400).send({ error: body.error.flatten() })
+
+    const { name, description, tags } = body.data
+    const updates: Record<string, unknown> = { updatedAt: new Date() }
+    if (name !== undefined) {
+      updates.name = name
+      updates.slug = slugify(name)
+    }
+    if (description !== undefined) updates.description = description
+    if (tags !== undefined) updates.tags = tags
+
+    const [updated] = await app.db
+      .update(datasets)
+      .set(updates)
+      .where(and(eq(datasets.id, id), eq(datasets.ownerId, SYSTEM_OWNER_ID)))
+      .returning()
+
+    if (!updated) return reply.status(404).send({ error: 'Dataset not found' })
+    return reply.send({ dataset: updated })
+  })
+
   // ── DELETE /api/v1/datasets/:id ──────────────
   app.delete<{ Params: { id: string } }>('/api/v1/datasets/:id', async (req, reply) => {
     const { id } = req.params
@@ -143,7 +184,7 @@ export default async function datasetRoutes(app: FastifyInstance) {
       const query = QueryRowsParams.safeParse(req.query)
       if (!query.success) return reply.status(400).send({ error: query.error.flatten() })
 
-      const { page, limit, sortBy, sortDir } = query.data
+      const { page, limit, sortBy, sortDir, filter } = query.data
 
       // Verify dataset exists and belongs to owner
       const [dataset] = await app.db
@@ -156,15 +197,21 @@ export default async function datasetRoutes(app: FastifyInstance) {
 
       const offset = (page - 1) * limit
 
-      // Base query — always order by position unless caller overrides
+      // Build WHERE conditions — start with dataset match, then add column filters
+      const conditions = [eq(datasetRows.datasetId, id)]
+      for (const { colId, value } of filter) {
+        // Case-insensitive substring match on the JSONB text value
+        conditions.push(sql`lower(data->>${colId}) like ${'%' + value.toLowerCase() + '%'}`)
+      }
+
+      // Base query
       let rowsQuery = app.db
         .select()
         .from(datasetRows)
-        .where(eq(datasetRows.datasetId, id))
+        .where(and(...conditions))
 
       // Apply ordering
       if (sortBy) {
-        // Sort on a JSON data key using Postgres JSONB path
         const dir = sortDir === 'desc' ? desc : asc
         rowsQuery = rowsQuery.orderBy(dir(sql`data->>${sortBy}`)) as typeof rowsQuery
       } else {
@@ -173,9 +220,19 @@ export default async function datasetRoutes(app: FastifyInstance) {
 
       const rows = await rowsQuery.offset(offset).limit(limit)
 
+      // When filters are active, count filtered rows; otherwise use cached rowCount
+      let total = dataset.rowCount
+      if (filter.length > 0) {
+        const [countRow] = await app.db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(datasetRows)
+          .where(and(...conditions))
+        total = countRow?.count ?? 0
+      }
+
       return reply.send({
         rows: rows.map((r) => ({ id: r.id, position: r.position, data: r.data })),
-        total: dataset.rowCount,
+        total,
         page,
         limit,
       })

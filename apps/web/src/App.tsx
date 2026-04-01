@@ -226,17 +226,28 @@ function DatasetDetailView({ dataset: initial, onBack }: { dataset: Dataset; onB
   const [page, setPage] = useState(1)
   const [sortBy, setSortBy] = useState<string | undefined>()
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [filters, setFilters] = useState<Record<string, string>>({})
+  const [filterOpen, setFilterOpen] = useState(false)
   const [loadingRows, setLoadingRows] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [editing, setEditing] = useState(false)
+  const [editName, setEditName] = useState(dataset.name)
+  const [editDesc, setEditDesc] = useState(dataset.description ?? '')
+  const [editError, setEditError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const schema: DatasetColumn[] = dataset.schema
 
-  const fetchRows = useCallback(async (p: number, sb?: string, sd?: 'asc' | 'desc') => {
+  const fetchRows = useCallback(async (
+    p: number,
+    sb?: string,
+    sd?: 'asc' | 'desc',
+    f?: Record<string, string>,
+  ) => {
     setLoadingRows(true)
     try {
-      const res = await api.getRows(dataset.id, { page: p, limit: PAGE_SIZE, sortBy: sb, sortDir: sd })
+      const res = await api.getRows(dataset.id, { page: p, limit: PAGE_SIZE, sortBy: sb, sortDir: sd, filters: f })
       setRows(res.rows)
       setTotal(res.total)
     } finally {
@@ -244,7 +255,7 @@ function DatasetDetailView({ dataset: initial, onBack }: { dataset: Dataset; onB
     }
   }, [dataset.id])
 
-  useEffect(() => { fetchRows(page, sortBy, sortDir) }, [fetchRows, page, sortBy, sortDir])
+  useEffect(() => { fetchRows(page, sortBy, sortDir, filters) }, [fetchRows, page, sortBy, sortDir, filters])
 
   const handleSort = (colId: string) => {
     if (sortBy === colId) {
@@ -256,6 +267,23 @@ function DatasetDetailView({ dataset: initial, onBack }: { dataset: Dataset; onB
     setPage(1)
   }
 
+  const handleFilterChange = (colId: string, value: string) => {
+    setFilters((prev) => {
+      const next = { ...prev }
+      if (value) next[colId] = value
+      else delete next[colId]
+      return next
+    })
+    setPage(1)
+  }
+
+  const clearFilters = () => {
+    setFilters({})
+    setPage(1)
+  }
+
+  const activeFilterCount = Object.values(filters).filter(Boolean).length
+
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -265,12 +293,29 @@ function DatasetDetailView({ dataset: initial, onBack }: { dataset: Dataset; onB
       const res = await api.uploadFile(dataset.id, file)
       setDataset(res.dataset)
       setPage(1)
-      await fetchRows(1, sortBy, sortDir)
+      setFilters({})
+      await fetchRows(1, sortBy, sortDir, {})
     } catch (err) {
       setUploadError(String(err))
     } finally {
       setUploading(false)
       if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
+  const handleEditSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editName.trim()) return
+    setEditError(null)
+    try {
+      const res = await api.updateDataset(dataset.id, {
+        name: editName.trim(),
+        description: editDesc.trim() || null,
+      })
+      setDataset(res.dataset)
+      setEditing(false)
+    } catch (err) {
+      setEditError(String(err))
     }
   }
 
@@ -290,15 +335,50 @@ function DatasetDetailView({ dataset: initial, onBack }: { dataset: Dataset; onB
       <div style={{ display: 'flex', alignItems: 'flex-start', marginBottom: 24, gap: 12 }}>
         <button style={S.btn('ghost')} onClick={onBack}>← Back</button>
         <div style={{ flex: 1 }}>
-          <h1 style={{ fontSize: 22, fontWeight: 700, margin: '0 0 4px' }}>{dataset.name}</h1>
-          {dataset.description && (
-            <p style={{ color: '#64748b', fontSize: 14, margin: 0 }}>{dataset.description}</p>
+          {editing ? (
+            <form onSubmit={handleEditSave}>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+                <input
+                  style={{ ...S.input, fontSize: 18, fontWeight: 700, width: 280 }}
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  autoFocus
+                />
+                <button type="submit" style={S.btn('primary')}>Save</button>
+                <button type="button" style={S.btn('ghost')} onClick={() => { setEditing(false); setEditName(dataset.name); setEditDesc(dataset.description ?? '') }}>Cancel</button>
+              </div>
+              <input
+                style={{ ...S.input, fontSize: 13, color: '#64748b', width: 400 }}
+                placeholder="Description (optional)"
+                value={editDesc}
+                onChange={(e) => setEditDesc(e.target.value)}
+              />
+              {editError && <p style={{ color: '#dc2626', fontSize: 12, margin: '4px 0 0' }}>{editError}</p>}
+            </form>
+          ) : (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <h1 style={{ fontSize: 22, fontWeight: 700, margin: '0 0 4px' }}>{dataset.name}</h1>
+                <button style={{ ...S.btn('ghost'), padding: '3px 8px', fontSize: 12 }} onClick={() => setEditing(true)}>Edit</button>
+              </div>
+              {dataset.description && (
+                <p style={{ color: '#64748b', fontSize: 14, margin: 0 }}>{dataset.description}</p>
+              )}
+              <p style={{ color: '#94a3b8', fontSize: 12, margin: '4px 0 0' }}>
+                {total.toLocaleString()} rows · {schema.length} columns
+              </p>
+            </>
           )}
-          <p style={{ color: '#94a3b8', fontSize: 12, margin: '4px 0 0' }}>
-            {total.toLocaleString()} rows · {schema.length} columns
-          </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          {schema.length > 0 && (
+            <button
+              style={{ ...S.btn(activeFilterCount > 0 ? 'primary' : 'ghost') }}
+              onClick={() => setFilterOpen((o) => !o)}
+            >
+              {activeFilterCount > 0 ? `Filter (${activeFilterCount})` : 'Filter'}
+            </button>
+          )}
           <a
             href={api.exportUrl(dataset.id, 'csv')}
             style={{ ...S.btn('ghost'), textDecoration: 'none' }}
@@ -330,6 +410,34 @@ function DatasetDetailView({ dataset: initial, onBack }: { dataset: Dataset; onB
       {uploadError && (
         <div style={{ background: '#fee2e2', color: '#dc2626', padding: '10px 14px', borderRadius: 6, marginBottom: 16, fontSize: 13 }}>
           Upload error: {uploadError}
+        </div>
+      )}
+
+      {/* Filter bar */}
+      {filterOpen && schema.length > 0 && (
+        <div style={{ ...S.card, marginBottom: 16, padding: '14px 16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#334155' }}>Filter rows</span>
+            {activeFilterCount > 0 && (
+              <button style={{ ...S.btn('ghost'), padding: '3px 8px', fontSize: 12 }} onClick={clearFilters}>Clear all</button>
+            )}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8 }}>
+            {schema.map((col) => (
+              <div key={col.id}>
+                <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#94a3b8', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: 1, background: typeColor[col.type] ?? '#94a3b8', marginRight: 4 }} />
+                  {col.name}
+                </label>
+                <input
+                  style={{ ...S.input, fontSize: 13 }}
+                  placeholder={`Filter ${col.name}…`}
+                  value={filters[col.id] ?? ''}
+                  onChange={(e) => handleFilterChange(col.id, e.target.value)}
+                />
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
