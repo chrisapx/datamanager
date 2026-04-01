@@ -235,6 +235,9 @@ function DatasetDetailView({ dataset: initial, onBack }: { dataset: Dataset; onB
   const [editName, setEditName] = useState(dataset.name)
   const [editDesc, setEditDesc] = useState(dataset.description ?? '')
   const [editError, setEditError] = useState<string | null>(null)
+  const [addingRow, setAddingRow] = useState(false)
+  const [newRowData, setNewRowData] = useState<Record<string, string>>({})
+  const [addRowError, setAddRowError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const schema: DatasetColumn[] = dataset.schema
@@ -319,6 +322,37 @@ function DatasetDetailView({ dataset: initial, onBack }: { dataset: Dataset; onB
     }
   }
 
+  const handleAddRow = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setAddRowError(null)
+    try {
+      const data: Record<string, unknown> = {}
+      for (const col of schema) {
+        const raw = newRowData[col.id] ?? ''
+        data[col.id] = raw === '' ? null : raw
+      }
+      await api.addRow(dataset.id, data)
+      setNewRowData({})
+      setAddingRow(false)
+      // Refresh rows and update local rowCount
+      setDataset((d) => ({ ...d, rowCount: d.rowCount + 1 }))
+      await fetchRows(page, sortBy, sortDir, filters)
+    } catch (err) {
+      setAddRowError(String(err))
+    }
+  }
+
+  const handleDeleteRow = async (rowId: string) => {
+    if (!confirm('Delete this row?')) return
+    try {
+      await api.deleteRow(dataset.id, rowId)
+      setDataset((d) => ({ ...d, rowCount: Math.max(0, d.rowCount - 1) }))
+      await fetchRows(page, sortBy, sortDir, filters)
+    } catch (err) {
+      setUploadError(String(err))
+    }
+  }
+
   const totalPages = Math.ceil(total / PAGE_SIZE)
 
   const typeColor: Record<string, string> = {
@@ -393,7 +427,12 @@ function DatasetDetailView({ dataset: initial, onBack }: { dataset: Dataset; onB
           >
             Export JSON
           </a>
-          <label style={{ ...S.btn('primary'), cursor: 'pointer' }}>
+          {schema.length > 0 && (
+            <button style={S.btn('primary')} onClick={() => { setAddingRow(true); setNewRowData({}); setAddRowError(null) }}>
+              + Add Row
+            </button>
+          )}
+          <label style={{ ...S.btn('ghost'), cursor: 'pointer' }}>
             {uploading ? 'Uploading…' : 'Upload File'}
             <input
               ref={fileRef}
@@ -438,6 +477,36 @@ function DatasetDetailView({ dataset: initial, onBack }: { dataset: Dataset; onB
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Add row form */}
+      {addingRow && schema.length > 0 && (
+        <div style={{ ...S.card, marginBottom: 16, padding: '14px 16px' }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 10 }}>New Row</div>
+          <form onSubmit={handleAddRow}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8, marginBottom: 12 }}>
+              {schema.map((col) => (
+                <div key={col.id}>
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#94a3b8', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: 1, background: typeColor[col.type] ?? '#94a3b8', marginRight: 4 }} />
+                    {col.name}
+                  </label>
+                  <input
+                    style={{ ...S.input, fontSize: 13 }}
+                    placeholder={col.type}
+                    value={newRowData[col.id] ?? ''}
+                    onChange={(e) => setNewRowData((prev) => ({ ...prev, [col.id]: e.target.value }))}
+                  />
+                </div>
+              ))}
+            </div>
+            {addRowError && <p style={{ color: '#dc2626', fontSize: 12, margin: '0 0 8px' }}>{addRowError}</p>}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="submit" style={S.btn('primary')}>Save Row</button>
+              <button type="button" style={S.btn('ghost')} onClick={() => { setAddingRow(false); setAddRowError(null) }}>Cancel</button>
+            </div>
+          </form>
         </div>
       )}
 
@@ -489,6 +558,7 @@ function DatasetDetailView({ dataset: initial, onBack }: { dataset: Dataset; onB
                         )}
                       </th>
                     ))}
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid #e2e8f0', width: 36 }} />
                   </tr>
                 </thead>
                 <tbody>
@@ -519,6 +589,15 @@ function DatasetDetailView({ dataset: initial, onBack }: { dataset: Dataset; onB
                           </td>
                         )
                       })}
+                      <td style={{ padding: '4px 8px' }}>
+                        <button
+                          style={{ ...S.btn('danger'), padding: '3px 6px', fontSize: 11 }}
+                          onClick={() => handleDeleteRow(row.id)}
+                          title="Delete row"
+                        >
+                          ×
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

@@ -105,6 +105,16 @@ export const api = {
     return apiFetch<RowsResponse>(`/api/v1/datasets/${id}/rows?${q}`)
   },
 
+  addRow: (id: string, data: Record<string, unknown>) =>
+    apiFetch<{ row: DatasetRow }>(`/api/v1/datasets/${id}/rows`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data }),
+    }),
+
+  deleteRow: (datasetId: string, rowId: string) =>
+    apiFetch<void>(`/api/v1/datasets/${datasetId}/rows/${rowId}`, { method: 'DELETE' }),
+
   exportUrl: (id: string, format: 'csv' | 'json') =>
     `/api/v1/datasets/${id}/export?format=${format}`,
 }

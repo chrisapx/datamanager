@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { eq, desc, asc, and, sql } from 'drizzle-orm'
+import { eq, desc, asc, and, sql, max } from 'drizzle-orm'
 import { datasets, datasetRows, SYSTEM_OWNER_ID } from '@datamanager/db'
 import type { DatasetColumn } from '@datamanager/db'
 import { parse as csvParse } from 'csv-parse/sync'
@@ -388,6 +388,78 @@ export default async function datasetRoutes(app: FastifyInstance) {
       reply.header('Content-Type', 'application/json')
       reply.header('Content-Disposition', `attachment; filename="${dataset.slug}.json"`)
       return reply.send(JSON.stringify(namedRows, null, 2))
+    }
+  )
+
+  // ── POST /api/v1/datasets/:id/rows ───────────
+  // Append a single row to a dataset (manual entry)
+  app.post<{ Params: { id: string } }>('/api/v1/datasets/:id/rows', async (req, reply) => {
+    const { id } = req.params
+
+    const [dataset] = await app.db
+      .select()
+      .from(datasets)
+      .where(and(eq(datasets.id, id), eq(datasets.ownerId, SYSTEM_OWNER_ID)))
+      .limit(1)
+
+    if (!dataset) return reply.status(404).send({ error: 'Dataset not found' })
+    if (!dataset.schema || (dataset.schema as DatasetColumn[]).length === 0) {
+      return reply.status(400).send({ error: 'Dataset has no schema. Upload a file first or define columns.' })
+    }
+
+    const body = z.object({ data: z.record(z.unknown()) }).safeParse(req.body)
+    if (!body.success) return reply.status(400).send({ error: body.error.flatten() })
+
+    // Determine next position
+    const [posRow] = await app.db
+      .select({ maxPos: max(datasetRows.position) })
+      .from(datasetRows)
+      .where(eq(datasetRows.datasetId, id))
+    const nextPos = (posRow?.maxPos ?? -1) + 1
+
+    const [inserted] = await app.db
+      .insert(datasetRows)
+      .values({ datasetId: id, position: nextPos, data: body.data.data })
+      .returning()
+
+    // Increment cached rowCount
+    await app.db
+      .update(datasets)
+      .set({ rowCount: sql`${datasets.rowCount} + 1`, updatedAt: new Date() })
+      .where(eq(datasets.id, id))
+
+    return reply.status(201).send({ row: { id: inserted.id, position: inserted.position, data: inserted.data } })
+  })
+
+  // ── DELETE /api/v1/datasets/:id/rows/:rowId ──
+  app.delete<{ Params: { id: string; rowId: string } }>(
+    '/api/v1/datasets/:id/rows/:rowId',
+    async (req, reply) => {
+      const { id, rowId } = req.params
+
+      // Verify dataset ownership
+      const [dataset] = await app.db
+        .select({ id: datasets.id })
+        .from(datasets)
+        .where(and(eq(datasets.id, id), eq(datasets.ownerId, SYSTEM_OWNER_ID)))
+        .limit(1)
+
+      if (!dataset) return reply.status(404).send({ error: 'Dataset not found' })
+
+      const [deleted] = await app.db
+        .delete(datasetRows)
+        .where(and(eq(datasetRows.id, rowId), eq(datasetRows.datasetId, id)))
+        .returning({ id: datasetRows.id })
+
+      if (!deleted) return reply.status(404).send({ error: 'Row not found' })
+
+      // Decrement cached rowCount
+      await app.db
+        .update(datasets)
+        .set({ rowCount: sql`greatest(${datasets.rowCount} - 1, 0)`, updatedAt: new Date() })
+        .where(eq(datasets.id, id))
+
+      return reply.status(204).send()
     }
   )
 }
