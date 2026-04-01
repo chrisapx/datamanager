@@ -234,6 +234,7 @@ function DatasetDetailView({ dataset: initial, onBack }: { dataset: Dataset; onB
   const [editing, setEditing] = useState(false)
   const [editName, setEditName] = useState(dataset.name)
   const [editDesc, setEditDesc] = useState(dataset.description ?? '')
+  const [editTagsRaw, setEditTagsRaw] = useState(dataset.tags.join(', '))
   const [editError, setEditError] = useState<string | null>(null)
   const [addingRow, setAddingRow] = useState(false)
   const [newRowData, setNewRowData] = useState<Record<string, string>>({})
@@ -311,9 +312,11 @@ function DatasetDetailView({ dataset: initial, onBack }: { dataset: Dataset; onB
     if (!editName.trim()) return
     setEditError(null)
     try {
+      const tags = editTagsRaw.split(',').map((t) => t.trim()).filter(Boolean)
       const res = await api.updateDataset(dataset.id, {
         name: editName.trim(),
         description: editDesc.trim() || null,
+        tags,
       })
       setDataset(res.dataset)
       setEditing(false)
@@ -379,14 +382,22 @@ function DatasetDetailView({ dataset: initial, onBack }: { dataset: Dataset; onB
                   autoFocus
                 />
                 <button type="submit" style={S.btn('primary')}>Save</button>
-                <button type="button" style={S.btn('ghost')} onClick={() => { setEditing(false); setEditName(dataset.name); setEditDesc(dataset.description ?? '') }}>Cancel</button>
+                <button type="button" style={S.btn('ghost')} onClick={() => { setEditing(false); setEditName(dataset.name); setEditDesc(dataset.description ?? ''); setEditTagsRaw(dataset.tags.join(', ')) }}>Cancel</button>
               </div>
-              <input
-                style={{ ...S.input, fontSize: 13, color: '#64748b', width: 400 }}
-                placeholder="Description (optional)"
-                value={editDesc}
-                onChange={(e) => setEditDesc(e.target.value)}
-              />
+              <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                <input
+                  style={{ ...S.input, fontSize: 13, color: '#64748b', width: 260 }}
+                  placeholder="Description (optional)"
+                  value={editDesc}
+                  onChange={(e) => setEditDesc(e.target.value)}
+                />
+                <input
+                  style={{ ...S.input, fontSize: 13, color: '#64748b', width: 200 }}
+                  placeholder="Tags (comma-separated)"
+                  value={editTagsRaw}
+                  onChange={(e) => setEditTagsRaw(e.target.value)}
+                />
+              </div>
               {editError && <p style={{ color: '#dc2626', fontSize: 12, margin: '4px 0 0' }}>{editError}</p>}
             </form>
           ) : (
@@ -398,9 +409,14 @@ function DatasetDetailView({ dataset: initial, onBack }: { dataset: Dataset; onB
               {dataset.description && (
                 <p style={{ color: '#64748b', fontSize: 14, margin: 0 }}>{dataset.description}</p>
               )}
-              <p style={{ color: '#94a3b8', fontSize: 12, margin: '4px 0 0' }}>
-                {total.toLocaleString()} rows · {schema.length} columns
-              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                <span style={{ color: '#94a3b8', fontSize: 12 }}>
+                  {total.toLocaleString()} rows · {schema.length} columns
+                </span>
+                {dataset.tags.map((t) => (
+                  <span key={t} style={{ ...S.badge('#6366f1') }}>{t}</span>
+                ))}
+              </div>
             </>
           )}
         </div>
