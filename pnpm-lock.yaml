@@ -17,15 +17,27 @@ importers:
 
   apps/api:
     dependencies:
+      '@datamanager/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@fastify/cors':
         specifier: ^10.0.1
         version: 10.1.0
       '@fastify/multipart':
         specifier: ^9.0.1
         version: 9.4.0
+      csv-parse:
+        specifier: ^6.2.1
+        version: 6.2.1
+      drizzle-orm:
+        specifier: ^0.39.3
+        version: 0.39.3(postgres@3.4.8)
       fastify:
         specifier: ^5.2.1
         version: 5.8.4
+      fastify-plugin:
+        specifier: ^5.1.0
+        version: 5.1.0
       zod:
         specifier: ^3.24.1
         version: 3.25.76
@@ -1020,6 +1032,9 @@ packages:
 
   csstype@3.2.3:
     resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
+
+  csv-parse@6.2.1:
+    resolution: {integrity: sha512-LRLMV+UCyfMokp8Wb411duBf1gaBKJfOfBWU9eHMJ+b+cJYZsNu3AFmjJf3+yPGd59Exz1TsMjaSFyxnYB9+IQ==}
 
   debug@4.4.3:
     resolution: {integrity: sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==}
@@ -2120,6 +2135,8 @@ snapshots:
   cookie@1.1.1: {}
 
   csstype@3.2.3: {}
+
+  csv-parse@6.2.1: {}
 
   debug@4.4.3:
     dependencies:
